@@ -1,4 +1,7 @@
 import os
+
+import pandas as pd
+import pytest
 import logging
 import ast
 import random
@@ -15,6 +18,9 @@ class Language(Enum):
 
 class Program:
     def __init__(self, path: Optional[Path] = None, source: Optional[str] = None):
+        self.results = None
+        self.path_tests = None
+        self.source_tests = None
         self.testcases = None
         self.source = source
         self.path = path
@@ -39,13 +45,98 @@ class Program:
     def dump(self) -> str:
         return self.source
 
-    def test_dataset(self) -> list[bool]:
+    def test_dataset(self, testcases_path: str) -> str:
         """Return a list of booleans indicating whether the set of tests for the program fails or passes."""
         self.testcases = []
-        return []
+        assert self.path is not None
+        test_file = Path(testcases_path)
+        self.path_tests = testcases_path
+        self.source_tests = test_file.read_text(encoding="utf-8")
+        return self.source_tests
 
     def generate_subsets(self, subset_size: int, overlapping: bool = False) -> List[List[str]]:
         return self.subsets
+
+    def run_tests(self) -> List[bool]:
+        if self.source_tests is None:
+            raise ValueError("Test cases not loaded. Please run test_dataset first.")
+
+        # use os.system to run the tests
+        results = [] # list of dicts with tests results and reasons
+        test_file_path = self.path_tests
+        if test_file_path is None:
+            raise ValueError("Test cases path is not set.")
+
+        os.system(f"pytest {test_file_path} --tb=short --no-header -vv >> pytest_output.txt")
+        with open("pytest_output.txt", "r") as f:
+            lines = f.readlines()
+            complete_output = "".join(lines)
+            start_index = 0
+            for i, line in enumerate(lines):
+                if line.startswith("collecting"):
+                    start_index = i + 1
+            for line in lines[start_index:]:
+                if line.find("FAILED") != -1:
+                    reason = complete_output.find(f"FAILED {line.split(" ")[0]}::")
+                    reason = complete_output[reason:reason+5].strip()
+                    print(f"Reason: {reason} at line: {line}")
+                    results.append({
+                        "failed": True,
+                        "test": line.split(" ")[0],
+                        "reason": reason
+                    })
+                elif line.find("PASSED") != -1:
+                    results.append({
+                        "failed": False,
+                        "test": line.split(" ")[0],
+                        "reason": None
+                    })
+                elif line.startswith("==="):
+                    break
+        os.remove("pytest_output.txt")
+        self.results = results
+        return results
+
+    def rerun_tests(self, failed_only: bool = True) -> Optional[List[dict]]:
+        if self.results is None:
+            self.run_tests()
+
+        df = pd.DataFrame(self.results)
+        failed_tests = df[df["failed"] == failed_only]
+        if len(failed_tests) > 0:
+            print(f"Number of failed tests: {len(failed_tests)}")
+            new_results = []
+            for _, row in failed_tests.iterrows():
+                print(f"Test: {row['test']}, Reason: {row['reason']}")
+                # rerun
+                os.system(f"pytest row['test'] --tb=short --no-header -vv >> pytest_output.txt")
+                # collect results:
+                with open("pytest_output.txt", "r") as f:
+                    lines = f.read()
+                    failed = lines.find("FAILED") != -1
+                    if failed:
+                        reason = lines.find(f"FAILED {row['test']}")
+                        reason = lines[reason:reason + 5].strip()
+                        new_results.append({
+                            "failed": True,
+                            "test": row['test'],
+                            "reason": reason
+                        })
+                    else:
+                        new_results.append({
+                            "failed": False,
+                            "test": row['test'],
+                            "reason": None
+                        })
+                os.remove("pytest_output.txt")
+            print("Rerun results:")
+            for res in new_results:
+                print(f"Test: {res['test']}, Failed: {res['failed']}, Reason: {res['reason']}")
+            return new_results
+        else:
+            print("No failed tests found.")
+            return None
+
 
 class LinesProgram(Program):
     def __init__(self, lines: Optional[list[str]] = None, source: str = None, path: Optional[Path] = None):
@@ -127,6 +218,16 @@ class ASTProgram(Program):
         self.source = source
         self.tree = tree
         return tree
+
+    def test_dataset(self, testcases_path: str) -> ast.Module:
+        self.testcases = []
+        assert self.path is not None
+        test_file = Path(testcases_path)
+        self.path_tests = testcases_path
+        self.source_tests = test_file.read_text(encoding="utf-8")
+        test_tree = ast.parse(self.source_tests)
+        self.testcases = test_tree
+        return self.testcases
 
     def collect_nodes(self) -> List[ast.AST]:
         nodes: List[ast.AST] = []

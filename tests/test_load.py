@@ -5,6 +5,10 @@ from src.load import Program, LinesProgram, ASTProgram
 
 
 class Load(unittest.TestCase):
+    def setUp(self):
+        self.program_path = Path("/home/melanenavaratnarajah/Documents/SoftReX/tests/data/equl.py")
+        self.test_path = Path("/home/melanenavaratnarajah/Documents/SoftReX/tests/data/test_equl.py")
+
     def test_load_file(self):
         program = Program(Path("/home/melanenavaratnarajah/Documents/SoftReX/tests/data/test_equl.py"))
         assert program.path == Path("/home/melanenavaratnarajah/Documents/SoftReX/tests/data/test_equl.py")
@@ -16,13 +20,31 @@ class Load(unittest.TestCase):
         program.from_source(source_code)
         assert program.source == source_code
 
-
     def test_dump(self):
         source_code = "def add(a, b):\n    return a + b\n"
         program = Program()
         program.from_source(source_code)
         dumped_code = program.dump()
         assert dumped_code == source_code
+
+    def test_test_dataset(self):
+        # Base Program loading test cases
+        program = Program(self.program_path)
+        program.test_dataset(str(self.test_path))
+        results = program.run_tests()
+        print(results)
+        assert program.source_tests is not None
+
+        # Lines Program loading test cases
+        lines_program = LinesProgram(path=self.program_path)
+        lines_program.test_dataset(str(self.test_path))
+        assert lines_program.source_tests is not None
+
+        # AST Program loading test cases
+        ast_program = ASTProgram(path=self.program_path)
+        ast_program.test_dataset(str(self.test_path))
+        assert ast_program.source_tests is not None
+        assert ast_program.testcases is not None
 
     def test_lines_program(self):
         lines = ["def add(a, b):", "    return a + b"]
